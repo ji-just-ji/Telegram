@@ -6,6 +6,7 @@ from time import time
 import requests
 from yt_dlp import YoutubeDL
 from telegram import Update
+from telegram.error import TimedOut, NetworkError
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 # --- CONFIG ---
 dotenv.load_dotenv()
@@ -35,7 +36,7 @@ def download_video(url: str, msg=None, loop=None):
                     )
 
     ydl_opts = {
-        "format": "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720]",
+        "format": "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080]",
         "merge_output_format": "mp4",
         "outtmpl": os.path.join(DOWNLOAD_DIR, "%(title)s.%(ext)s"),
         "noplaylist": True,
@@ -88,17 +89,10 @@ async def download_mirror_send(url, update):
 
         # Send video or external upload
         file_size = os.path.getsize(mirrored_path)
-        if file_size <= TELEGRAM_LIMIT:
-            await msg.edit_text(f"📤 Uploading **{title} (mirrored)**...")
-            await update.message.reply_video(video=open(mirrored_path, "rb"), caption=f"{title} (mirrored)")
-        else:
-            await msg.edit_text("⚠️ File too large for Telegram. Upload externally...")
-            link = upload_to_transfersh(mirrored_path)
-            if link:
-                await update.message.reply_text(f"✅ **{title} (mirrored)** uploaded:\n{link}")
-            else:
-                await update.message.reply_text("❌ Upload failed.")
-
+        
+        await msg.edit_text(f"📤 Uploading **{title} (mirrored)**...")
+        await update.message.reply_video(video=open(mirrored_path, "rb"), caption=f"{title} (mirrored)")
+        
     except Exception as e:
         await msg.edit_text(f"❌ Error: {e}")
     finally:
@@ -140,8 +134,24 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if file_size <= TELEGRAM_LIMIT:
             await msg.edit_text(f"📤 Uploading **{title} (mirrored)**...")
             print(f"📤 Uploading {mirrored_path} to Telegram")
-            await update.message.reply_video(video=open(mirrored_path, "rb"), caption=f"{title} (mirrored)")
-            print("✅ Upload finished")
+            try:
+                await update.message.reply_document(
+                    document=open(mirrored_path, "rb"),
+                    filename=f"{title} (mirrored).mp4",
+                    caption=f"{title} (mirrored)"
+                )
+                print("✅ Upload finished successfully.")
+            except TimedOut:
+                print("⚠️ Upload likely succeeded, but Telegram took too long to confirm.")
+                await msg.edit_text(
+                    "⚠️ Upload took longer than expected — please check your chat for the file."
+                )
+            except NetworkError as e:
+                print(f"⚠️ Network issue during upload: {e}")
+                await msg.edit_text("⚠️ Network issue during upload, please retry later.")
+            except Exception as e:
+                print(f"❌ Unexpected error during upload: {e}")
+                await msg.edit_text(f"❌ Unexpected upload error: {e}")
         else:
             await msg.edit_text("⚠️ File too large for Telegram. Upload externally...")
             print("⚠️ File too large, skipping Telegram upload")
@@ -151,7 +161,6 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await msg.edit_text(f"❌ Error: {e}")
     finally:
       
-        await asyncio.sleep(300)
         for f in [file_path, mirrored_path]:
             if f and os.path.exists(f):
                 os.remove(f)
