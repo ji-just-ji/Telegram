@@ -1,5 +1,6 @@
 import os
 import asyncio    
+import json
 
 from pyngrok import ngrok
 from telegram import ReplyKeyboardMarkup, Update
@@ -24,7 +25,36 @@ async def schedule_cleanup(path, delay=900):  # 900s = 15min
         except Exception as e:
             print(f"⚠️ Cleanup failed for {path}: {e}")
 
+async def store_user(update, file_path):
+    username = update.effective_user.username or str(update.effective_user.id)
+    title = os.path.basename(file_path)
+    size = os.path.getsize(file_path)
+    user_data = {}
+    if os.path.exists("users.json"):
+        try:
+            with open("users.json", "r", encoding="utf-8") as f:
+                user_data = json.load(f)
+        except json.JSONDecodeError:
+            print("⚠️ users.json is corrupted — starting fresh.")
+            user_data = {}
 
+    # Ensure user key exists
+    if username not in user_data:
+        user_data[username] = []
+
+    # Append new record
+    user_data[username].append({
+        "title": title,
+        "size": size
+    })
+
+    # Write back
+    with open("users.json", "w", encoding="utf-8") as f:
+        json.dump(user_data, f, ensure_ascii=False, indent=2)
+
+    print(f"✅ Stored download info for user {username}: {title} ({size} bytes)")
+        
+        
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     print("ℹ️ /start command received")
     await update.message.reply_text("🎬 Send me a YouTube link, and I’ll download & mirror it!") # type: ignore
@@ -40,6 +70,7 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return LINK
 
     user_id = update.message.from_user.id # type: ignore
+    print("Storing user choice for user_id:", user_id)
     user_choices[user_id] = {"url": url}
 
     keyboard = [["Mirrored", "Normal"]]
@@ -79,7 +110,8 @@ async def handle_resolution(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Download
     file_path, title = await loop.run_in_executor(None, download_video, url, msg, loop, resolution)
-
+    await store_user(update, file_path) # type: ignore
+    
     # Mirror if chosen
     final_path = file_path
     if mirror:
@@ -90,7 +122,7 @@ async def handle_resolution(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Send file
     file_size = os.path.getsize(final_path)
-    if file_size <= TELEGRAM_LIMIT:
+    if file_size <= 0:
         await msg.edit_text(f"📤 Uploading {title} ({resolution}p)...")
         try:
             await update.message.reply_document(  # type: ignore
