@@ -1,17 +1,21 @@
 import os
-import asyncio
+import asyncio    
+
+from pyngrok import ngrok
 from telegram import ReplyKeyboardMarkup, Update
 from telegram.error import TimedOut, NetworkError
 from telegram.ext import ContextTypes, ConversationHandler, CommandHandler, MessageHandler, filters
 from config import CLEANUP_DELAY, TELEGRAM_LIMIT
 from downloader import download_video
 from mirror import mirror_video
+from server import register_file
 
 
 LINK, CHOICE, RESOLUTION = range(3)
 user_choices = {}
 
 async def schedule_cleanup(path, delay=900):  # 900s = 15min
+    print(f"🗑️ Scheduled cleanup for {path} in {delay} seconds")
     await asyncio.sleep(delay)
     if os.path.exists(path):
         try:
@@ -88,14 +92,30 @@ async def handle_resolution(update: Update, context: ContextTypes.DEFAULT_TYPE):
     file_size = os.path.getsize(final_path)
     if file_size <= TELEGRAM_LIMIT:
         await msg.edit_text(f"📤 Uploading {title} ({resolution}p)...")
-        await update.message.reply_document( # type: ignore
-            document=open(final_path, "rb"),
-            filename=os.path.basename(final_path),
-            caption=f"{title} ({resolution}p){' (mirrored)' if mirror else ''}"
-        )
-        print("✅ Upload complete")
-    else:
-        await msg.edit_text("⚠️ File too large for Telegram (max 50 MB).")
+        try:
+            await update.message.reply_document(  # type: ignore
+                document=open(final_path, "rb"),
+                filename=os.path.basename(final_path),
+                caption=f"{title} ({resolution}p){' (mirrored)' if mirror else ''}"
+            )
+            print("✅ Upload complete")
+        except TimedOut:
+            print("⚠️ Upload likely succeeded, but Telegram took too long to confirm.")
+        except NetworkError as e:
+            print(f"⚠️ Network issue during upload: {e}")
+    else:    
+      await msg.edit_text("⚠️ File too large for Telegram. Uploading externally...")
+      try:
+          file_id = register_file(os.path.basename(final_path))
+          ngrok_url = ngrok.get_tunnels()[0].public_url
+          link = f"{ngrok_url}/videos/{file_id}"
+          await update.message.reply_text( # type: ignore
+              f"⚠️ File too large for Telegram.\n📎 Download link: {link}\n"
+              "Link is temporary; file will be deleted shortly."
+          )
+      except Exception as e:
+          print(f"❌ External upload failed: {e}")
+          await update.message.reply_text(f"❌ Upload failed: {e}") # type: ignore
 
     # Schedule cleanup
     asyncio.create_task(schedule_cleanup(file_path, CLEANUP_DELAY))
@@ -108,6 +128,9 @@ async def handle_resolution(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("❌ Cancelled.") # type: ignore
     return ConversationHandler.END
+
+
+
   
 conv_handler = ConversationHandler(
     entry_points=[CommandHandler("start", start)],
