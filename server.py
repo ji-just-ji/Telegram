@@ -18,10 +18,24 @@ app = Flask(__name__)
 
 @app.route('/videos/<file_id>')
 def get_video(file_id):
-    full_path = file_map.get(file_id)
+    full_path = file_map.get(file_id)    
+    
+    # Build full path
+    path = os.path.join(SERVER_DIR, full_path) if full_path else None
+
+    # DEBUG LINES
+    print("===== DEBUG GET VIDEO =====")
+    print("Requested file_id:", file_id)
+    print("Mapped filename:", full_path)
+    print("Full path:", path)
+    print("File exists:", os.path.exists(path) if path else False)
+    print("===========================")
+
     if not full_path or not os.path.exists(full_path):
         print(f"❌ 404: file_id={file_id}, path={full_path}")
         return "File not found", 404
+
+    # Lookup the actual filename
 
     # DEBUG
     print(f"✅ Serving {full_path} for id {file_id}")
