@@ -27,8 +27,15 @@ def download_video(url: str, msg=None, loop=None, resolution="1080"):
         "quiet": True,
         "progress_hooks": [progress_hook],
         "postprocessors": [
-            {"key": "FFmpegVideoConvertor", "preferedformat": "mp4"},
+            {"key": "FFmpegVideoConvertor", "preferedformat": "mp4"},  # double-check key spelling
         ],
+        "http_headers": {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                  "AppleWebKit/537.36 (KHTML, like Gecko) "
+                  "Chrome/117.0.0.0 Safari/537.36",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Referer": "https://www.youtube.com/"
+        }
     }
 
     print(f"⏳ Starting download: {url}")
